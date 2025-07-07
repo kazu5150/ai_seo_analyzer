@@ -11,14 +11,14 @@ interface PageContent {
   headings: string[];
 }
 
-export async function analyzeWebsite(url: string): Promise<KeywordWithReason[]> {
+export async function analyzeWebsite(url: string, showBrowserOverride?: boolean): Promise<KeywordWithReason[]> {
   let browser: Browser | null = null;
   
   try {
     progressEmitter.emit('🚀 ブラウザを起動中...');
     
-    // ブラウザを可視化して起動（環境変数で制御）
-    const showBrowser = process.env.SHOW_BROWSER === 'true';
+    // ブラウザを可視化して起動（フロントエンドからの設定または環境変数で制御）
+    const showBrowser = showBrowserOverride ?? (process.env.SHOW_BROWSER === 'true');
     browser = await chromium.launch({ 
       headless: !showBrowser,
       slowMo: showBrowser ? 300 : 0 // ブラウザ表示時は動作を見やすくするため遅延を追加

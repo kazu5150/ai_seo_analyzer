@@ -9,7 +9,7 @@ const headers = {
 };
 
 export async function POST(request: NextRequest) {
-  const { url } = await request.json();
+  const { url, showBrowser = false } = await request.json();
 
   if (!url) {
     return NextResponse.json(
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
   // 通常のレスポンスとして処理
   try {
-    const keywords = await analyzeWebsite(url);
+    const keywords = await analyzeWebsite(url, showBrowser);
     return NextResponse.json({ keywords });
   } catch (error) {
     console.error('Website analysis error:', error);
