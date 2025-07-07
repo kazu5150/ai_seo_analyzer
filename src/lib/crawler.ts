@@ -1,5 +1,7 @@
 import { chromium, Browser, Page } from 'playwright';
 import OpenAI from 'openai';
+import { KeywordWithReason } from '@/types/keyword';
+import { progressEmitter } from './progress-emitter';
 
 interface PageContent {
   url: string;
@@ -9,11 +11,20 @@ interface PageContent {
   headings: string[];
 }
 
-export async function analyzeWebsite(url: string): Promise<string[]> {
+export async function analyzeWebsite(url: string): Promise<KeywordWithReason[]> {
   let browser: Browser | null = null;
   
   try {
-    browser = await chromium.launch({ headless: true });
+    progressEmitter.emit('🚀 ブラウザを起動中...');
+    
+    // ブラウザを可視化して起動（環境変数で制御）
+    const showBrowser = process.env.SHOW_BROWSER === 'true';
+    browser = await chromium.launch({ 
+      headless: !showBrowser,
+      slowMo: showBrowser ? 300 : 0 // ブラウザ表示時は動作を見やすくするため遅延を追加
+    });
+    
+    progressEmitter.emit('📄 新しいページを作成中...');
     const page = await browser.newPage();
     
     const visitedUrls = new Set<string>();
@@ -22,8 +33,10 @@ export async function analyzeWebsite(url: string): Promise<string[]> {
     
     await crawlPage(page, url, baseUrl, visitedUrls, pageContents, 0);
     
+    progressEmitter.emit('🤖 AIでキーワードを分析中...');
     const keywords = await extractKeywordsWithAI(pageContents);
     
+    progressEmitter.emit('✅ 分析完了！');
     return keywords;
   } catch (error) {
     console.error('Crawling error:', error);
@@ -50,7 +63,16 @@ async function crawlPage(
   visitedUrls.add(url);
   
   try {
+    console.log(`🔍 クロール中: ${url}`);
+    progressEmitter.emit(`🔍 ページを読み込み中: ${url}`);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    
+    // ページを少しスクロールして全体を確認
+    progressEmitter.emit('📜 ページをスクロールして内容を確認中...');
+    await page.evaluate(() => {
+      window.scrollTo(0, document.body.scrollHeight / 2);
+    });
+    await page.waitForTimeout(1000);
     
     const content = await page.evaluate(() => {
       const getText = (selector: string): string => {
@@ -81,6 +103,8 @@ async function crawlPage(
         .filter(href => href.startsWith(baseUrl));
     }, baseUrl);
     
+    progressEmitter.emit(`🔗 ${links.length}個のリンクを発見`);
+    
     for (const link of links.slice(0, 3)) {
       if (visitedUrls.size < 5) {
         await crawlPage(page, link, baseUrl, visitedUrls, pageContents, depth + 1);
@@ -91,7 +115,7 @@ async function crawlPage(
   }
 }
 
-async function extractKeywordsWithAI(pageContents: PageContent[]): Promise<string[]> {
+async function extractKeywordsWithAI(pageContents: PageContent[]): Promise<KeywordWithReason[]> {
   if (!process.env.OPENAI_API_KEY) {
     console.error('OpenAI API key not found');
     return extractKeywordsFallback(pageContents);
@@ -119,37 +143,54 @@ async function extractKeywordsWithAI(pageContents: PageContent[]): Promise<strin
 ウェブサイトの内容:
 ${combinedContent}
 
-以下の形式で、検索キーワードを10個提案してください:
-1. [キーワード]
-2. [キーワード]
-...
-10. [キーワード]
+以下のJSON形式で、検索キーワードを10個提案してください。各キーワードについて、なぜそのキーワードが効果的なのか根拠も説明してください:
+{
+  "keywords": [
+    {
+      "keyword": "[実際のキーワード]",
+      "reason": "[そのキーワードを選んだ理由、ターゲット層、検索意図などの説明]"
+    },
+    ...
+  ]
+}
 
-各キーワードは日本語で、実際にユーザーが検索しそうな自然な表現にしてください。`;
+重要：
+- 各キーワードは日本語で、実際にユーザーが検索しそうな自然な表現にしてください
+- 根拠は具体的で、ビジネス価値やユーザーニーズとの関連性を明確に説明してください
+- 必ずJSON形式で回答してください`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.7,
-      max_tokens: 500,
+      max_tokens: 1500,
     });
 
     const content = response.choices[0].message.content || '';
-    const keywords = content
-      .split('\n')
-      .filter(line => line.match(/^\d+\./))
-      .map(line => line.replace(/^\d+\.\s*/, '').trim())
-      .filter(keyword => keyword.length > 0)
-      .slice(0, 10);
+    
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed.keywords && Array.isArray(parsed.keywords)) {
+        return parsed.keywords
+          .filter((item: any) => item.keyword && item.reason)
+          .map((item: any) => ({
+            keyword: item.keyword,
+            reason: item.reason
+          }))
+          .slice(0, 10);
+      }
+    } catch (parseError) {
+      console.error('Failed to parse OpenAI response:', parseError);
+    }
 
-    return keywords.length > 0 ? keywords : extractKeywordsFallback(pageContents);
+    return extractKeywordsFallback(pageContents);
   } catch (error) {
     console.error('OpenAI API error:', error);
     return extractKeywordsFallback(pageContents);
   }
 }
 
-function extractKeywordsFallback(pageContents: PageContent[]): string[] {
+function extractKeywordsFallback(pageContents: PageContent[]): KeywordWithReason[] {
   const wordFrequency = new Map<string, number>();
   const stopWords = new Set([
     'の', 'に', 'は', 'を', 'た', 'が', 'で', 'て', 'と', 'し', 'れ', 'さ', 'ある', 'いる', 'も', 'する',
@@ -179,16 +220,22 @@ function extractKeywordsFallback(pageContents: PageContent[]): string[] {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 50);
   
-  const importantWords = sortedWords.map(([word]) => word);
+  const importantWords = sortedWords.map(([word, freq]) => ({ word, freq }));
   
-  const keywords: string[] = [];
+  const keywords: KeywordWithReason[] = [];
   
   for (let i = 0; i < Math.min(importantWords.length, 10); i++) {
     if (i < 5) {
-      keywords.push(importantWords[i]);
+      keywords.push({
+        keyword: importantWords[i].word,
+        reason: `出現頻度が高く（${importantWords[i].freq}回）、サイトの主要なトピックを表すキーワードです。`
+      });
     } else {
-      const combo = `${importantWords[Math.floor(Math.random() * 5)]} ${importantWords[i]}`;
-      keywords.push(combo);
+      const combo = `${importantWords[Math.floor(Math.random() * 5)].word} ${importantWords[i].word}`;
+      keywords.push({
+        keyword: combo,
+        reason: `複合キーワードとして、より具体的な検索意図に対応できる可能性があります。`
+      });
     }
   }
   
