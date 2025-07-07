@@ -20,8 +20,8 @@ export async function POST(request: NextRequest) {
 
   // 通常のレスポンスとして処理
   try {
-    const keywords = await analyzeWebsite(url, showBrowser);
-    return NextResponse.json({ keywords });
+    const { keywords, metaInfo } = await analyzeWebsite(url, showBrowser);
+    return NextResponse.json({ keywords, metaInfo });
   } catch (error) {
     console.error('Website analysis error:', error);
     return NextResponse.json(

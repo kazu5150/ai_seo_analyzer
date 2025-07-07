@@ -1,6 +1,7 @@
 import { chromium, Browser, Page } from 'playwright';
 import OpenAI from 'openai';
 import { KeywordWithReason } from '@/types/keyword';
+import { SEOMetaInfo } from '@/types/seo-meta';
 import { progressEmitter } from './progress-emitter';
 
 interface PageContent {
@@ -11,7 +12,7 @@ interface PageContent {
   headings: string[];
 }
 
-export async function analyzeWebsite(url: string, showBrowserOverride?: boolean): Promise<KeywordWithReason[]> {
+export async function analyzeWebsite(url: string, showBrowserOverride?: boolean): Promise<{ keywords: KeywordWithReason[], metaInfo: SEOMetaInfo }> {
   let browser: Browser | null = null;
   
   try {
@@ -31,13 +32,20 @@ export async function analyzeWebsite(url: string, showBrowserOverride?: boolean)
     const pageContents: PageContent[] = [];
     const baseUrl = new URL(url).origin;
     
-    await crawlPage(page, url, baseUrl, visitedUrls, pageContents, 0);
+    // 最初のページのメタ情報を取得
+    let metaInfo: SEOMetaInfo | null = null;
+    
+    await crawlPage(page, url, baseUrl, visitedUrls, pageContents, 0, (info) => {
+      if (!metaInfo) {
+        metaInfo = info;
+      }
+    });
     
     progressEmitter.emit('🤖 AIでキーワードを分析中...');
     const keywords = await extractKeywordsWithAI(pageContents);
     
     progressEmitter.emit('✅ 分析完了！');
-    return keywords;
+    return { keywords, metaInfo: metaInfo || await getDefaultMetaInfo(url) };
   } catch (error) {
     console.error('Crawling error:', error);
     throw error;
@@ -54,7 +62,8 @@ async function crawlPage(
   baseUrl: string,
   visitedUrls: Set<string>,
   pageContents: PageContent[],
-  depth: number
+  depth: number,
+  onFirstPageMeta?: (metaInfo: SEOMetaInfo) => void
 ): Promise<void> {
   if (depth > 2 || visitedUrls.has(url)) {
     return;
@@ -73,6 +82,13 @@ async function crawlPage(
       window.scrollTo(0, document.body.scrollHeight / 2);
     });
     await page.waitForTimeout(1000);
+    
+    // 最初のページの場合、メタ情報を取得
+    if (depth === 0 && onFirstPageMeta) {
+      progressEmitter.emit('📊 メタ情報を取得中...');
+      const metaInfo = await extractSEOMetaInfo(page, url);
+      onFirstPageMeta(metaInfo);
+    }
     
     const content = await page.evaluate(() => {
       const getText = (selector: string): string => {
@@ -107,7 +123,7 @@ async function crawlPage(
     
     for (const link of links.slice(0, 3)) {
       if (visitedUrls.size < 5) {
-        await crawlPage(page, link, baseUrl, visitedUrls, pageContents, depth + 1);
+        await crawlPage(page, link, baseUrl, visitedUrls, pageContents, depth + 1, onFirstPageMeta);
       }
     }
   } catch (error) {
@@ -240,4 +256,120 @@ function extractKeywordsFallback(pageContents: PageContent[]): KeywordWithReason
   }
   
   return keywords.slice(0, 10);
+}
+
+async function extractSEOMetaInfo(page: Page, url: string): Promise<SEOMetaInfo> {
+  const startTime = Date.now();
+  
+  const metaInfo = await page.evaluate(() => {
+    const getMeta = (name: string): string => {
+      const meta = document.querySelector(`meta[name="${name}"], meta[property="${name}"]`);
+      return meta?.getAttribute('content') || '';
+    };
+    
+    const getCharset = (): string => {
+      const charsetMeta = document.querySelector('meta[charset]');
+      if (charsetMeta) return charsetMeta.getAttribute('charset') || '';
+      const contentTypeMeta = document.querySelector('meta[http-equiv="Content-Type"]');
+      if (contentTypeMeta) {
+        const content = contentTypeMeta.getAttribute('content') || '';
+        const match = content.match(/charset=([^;]+)/);
+        return match ? match[1].trim() : '';
+      }
+      return '';
+    };
+    
+    const getHeadings = () => {
+      return {
+        h1: Array.from(document.querySelectorAll('h1')).map(h => h.textContent?.trim() || ''),
+        h2: Array.from(document.querySelectorAll('h2')).map(h => h.textContent?.trim() || ''),
+        h3: Array.from(document.querySelectorAll('h3')).map(h => h.textContent?.trim() || '')
+      };
+    };
+    
+    const getStructuredData = () => {
+      const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+      return Array.from(scripts).map(script => {
+        try {
+          return JSON.parse(script.textContent || '{}');
+        } catch {
+          return null;
+        }
+      }).filter(Boolean);
+    };
+    
+    const getAlternateLanguages = () => {
+      const links = document.querySelectorAll('link[rel="alternate"][hreflang]');
+      return Array.from(links).map(link => ({
+        lang: link.getAttribute('hreflang') || '',
+        url: link.getAttribute('href') || ''
+      }));
+    };
+    
+    return {
+      title: document.title || '',
+      metaDescription: getMeta('description'),
+      metaKeywords: getMeta('keywords'),
+      ogTitle: getMeta('og:title'),
+      ogDescription: getMeta('og:description'),
+      ogImage: getMeta('og:image'),
+      ogUrl: getMeta('og:url'),
+      twitterCard: getMeta('twitter:card'),
+      twitterTitle: getMeta('twitter:title'),
+      twitterDescription: getMeta('twitter:description'),
+      twitterImage: getMeta('twitter:image'),
+      canonicalUrl: document.querySelector('link[rel="canonical"]')?.getAttribute('href') || '',
+      robots: getMeta('robots'),
+      author: getMeta('author'),
+      viewport: getMeta('viewport'),
+      charset: getCharset(),
+      language: document.documentElement.lang || '',
+      favicon: document.querySelector('link[rel="icon"], link[rel="shortcut icon"]')?.getAttribute('href') || '',
+      headings: getHeadings(),
+      structuredData: getStructuredData(),
+      alternateLanguages: getAlternateLanguages()
+    };
+  });
+  
+  const response = await page.context().request.head(url);
+  const httpStatusCode = response.status();
+  const loadTime = Date.now() - startTime;
+  
+  return {
+    ...metaInfo,
+    httpStatusCode,
+    loadTime
+  };
+}
+
+async function getDefaultMetaInfo(url: string): Promise<SEOMetaInfo> {
+  return {
+    title: '',
+    metaDescription: '',
+    metaKeywords: '',
+    ogTitle: '',
+    ogDescription: '',
+    ogImage: '',
+    ogUrl: '',
+    twitterCard: '',
+    twitterTitle: '',
+    twitterDescription: '',
+    twitterImage: '',
+    canonicalUrl: '',
+    robots: '',
+    author: '',
+    viewport: '',
+    charset: '',
+    language: '',
+    favicon: '',
+    alternateLanguages: [],
+    structuredData: [],
+    httpStatusCode: 0,
+    loadTime: 0,
+    headings: {
+      h1: [],
+      h2: [],
+      h3: []
+    }
+  };
 }

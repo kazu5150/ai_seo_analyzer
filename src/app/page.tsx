@@ -2,14 +2,17 @@
 
 import { useState } from 'react';
 import { KeywordWithReason } from '@/types/keyword';
+import { SEOMetaInfo } from '@/types/seo-meta';
 
 export default function Home() {
   const [url, setUrl] = useState('');
   const [keywords, setKeywords] = useState<KeywordWithReason[]>([]);
+  const [metaInfo, setMetaInfo] = useState<SEOMetaInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedKeyword, setSelectedKeyword] = useState<number | null>(null);
   const [showBrowser, setShowBrowser] = useState(false);
+  const [activeTab, setActiveTab] = useState<'keywords' | 'meta'>('keywords');
 
   const analyzeWebsite = async () => {
     if (!url) {
@@ -20,6 +23,7 @@ export default function Home() {
     setLoading(true);
     setError('');
     setKeywords([]);
+    setMetaInfo(null);
     setSelectedKeyword(null);
 
     try {
@@ -38,6 +42,7 @@ export default function Home() {
       }
 
       setKeywords(data.keywords);
+      setMetaInfo(data.metaInfo);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'エラーが発生しました');
     } finally {
@@ -99,7 +104,32 @@ export default function Home() {
           )}
         </div>
 
-        {keywords.length > 0 && (
+        {(keywords.length > 0 || metaInfo) && (
+          <div className="mt-8">
+            <div className="flex space-x-1 mb-4">
+              <button
+                onClick={() => setActiveTab('keywords')}
+                className={`px-4 py-2 rounded-t-lg font-medium ${
+                  activeTab === 'keywords'
+                    ? 'bg-white text-blue-600 border-b-2 border-blue-600'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                キーワード分析
+              </button>
+              <button
+                onClick={() => setActiveTab('meta')}
+                className={`px-4 py-2 rounded-t-lg font-medium ${
+                  activeTab === 'meta'
+                    ? 'bg-white text-blue-600 border-b-2 border-blue-600'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                SEOメタ情報
+              </button>
+            </div>
+
+            {activeTab === 'keywords' && keywords.length > 0 && (
           <div className="mt-8 bg-white shadow rounded-lg p-6">
             <h2 className="text-2xl font-semibold mb-4">検索キーワード候補</h2>
             <div className="grid gap-3">
@@ -133,6 +163,187 @@ export default function Home() {
                 </div>
               ))}
             </div>
+          </div>
+            )}
+
+            {activeTab === 'meta' && metaInfo && (
+              <div className="bg-white shadow rounded-lg p-6">
+                <h2 className="text-2xl font-semibold mb-4">SEOメタ情報</h2>
+                
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-gray-800">基本情報</h3>
+                    <div className="grid gap-3">
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">タイトル:</span>
+                        <span className="text-gray-800 flex-1">{metaInfo.title || '(未設定)'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">メタディスクリプション:</span>
+                        <span className="text-gray-800 flex-1">{metaInfo.metaDescription || '(未設定)'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">メタキーワード:</span>
+                        <span className="text-gray-800 flex-1">{metaInfo.metaKeywords || '(未設定)'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">文字コード:</span>
+                        <span className="text-gray-800 flex-1">{metaInfo.charset || '(未設定)'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">言語:</span>
+                        <span className="text-gray-800 flex-1">{metaInfo.language || '(未設定)'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">HTTPステータス:</span>
+                        <span className={`flex-1 font-medium ${
+                          metaInfo.httpStatusCode >= 200 && metaInfo.httpStatusCode < 300 ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {metaInfo.httpStatusCode}
+                        </span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">読み込み時間:</span>
+                        <span className="text-gray-800 flex-1">{metaInfo.loadTime}ms</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-gray-800">OGP (Open Graph Protocol)</h3>
+                    <div className="grid gap-3">
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">OGタイトル:</span>
+                        <span className="text-gray-800 flex-1">{metaInfo.ogTitle || '(未設定)'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">OG説明:</span>
+                        <span className="text-gray-800 flex-1">{metaInfo.ogDescription || '(未設定)'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">OG画像:</span>
+                        <span className="text-gray-800 flex-1 break-all">{metaInfo.ogImage || '(未設定)'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">OG URL:</span>
+                        <span className="text-gray-800 flex-1 break-all">{metaInfo.ogUrl || '(未設定)'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-gray-800">Twitter Card</h3>
+                    <div className="grid gap-3">
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">Cardタイプ:</span>
+                        <span className="text-gray-800 flex-1">{metaInfo.twitterCard || '(未設定)'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">タイトル:</span>
+                        <span className="text-gray-800 flex-1">{metaInfo.twitterTitle || '(未設定)'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">説明:</span>
+                        <span className="text-gray-800 flex-1">{metaInfo.twitterDescription || '(未設定)'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">画像:</span>
+                        <span className="text-gray-800 flex-1 break-all">{metaInfo.twitterImage || '(未設定)'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-gray-800">SEO関連設定</h3>
+                    <div className="grid gap-3">
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">Canonical URL:</span>
+                        <span className="text-gray-800 flex-1 break-all">{metaInfo.canonicalUrl || '(未設定)'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">Robots:</span>
+                        <span className="text-gray-800 flex-1">{metaInfo.robots || '(未設定)'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">Viewport:</span>
+                        <span className="text-gray-800 flex-1">{metaInfo.viewport || '(未設定)'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-medium text-gray-600 w-40">著者:</span>
+                        <span className="text-gray-800 flex-1">{metaInfo.author || '(未設定)'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3 text-gray-800">見出し構造</h3>
+                    <div className="space-y-3">
+                      {metaInfo.headings.h1.length > 0 && (
+                        <div>
+                          <h4 className="font-medium text-gray-600 mb-1">H1 ({metaInfo.headings.h1.length}個)</h4>
+                          <ul className="list-disc list-inside text-gray-800 space-y-1">
+                            {metaInfo.headings.h1.map((h, i) => (
+                              <li key={i}>{h}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {metaInfo.headings.h2.length > 0 && (
+                        <div>
+                          <h4 className="font-medium text-gray-600 mb-1">H2 ({metaInfo.headings.h2.length}個)</h4>
+                          <ul className="list-disc list-inside text-gray-800 space-y-1">
+                            {metaInfo.headings.h2.slice(0, 5).map((h, i) => (
+                              <li key={i}>{h}</li>
+                            ))}
+                            {metaInfo.headings.h2.length > 5 && (
+                              <li className="text-gray-500">...他{metaInfo.headings.h2.length - 5}個</li>
+                            )}
+                          </ul>
+                        </div>
+                      )}
+                      {metaInfo.headings.h3.length > 0 && (
+                        <div>
+                          <h4 className="font-medium text-gray-600 mb-1">H3 ({metaInfo.headings.h3.length}個)</h4>
+                          <ul className="list-disc list-inside text-gray-800 space-y-1">
+                            {metaInfo.headings.h3.slice(0, 5).map((h, i) => (
+                              <li key={i}>{h}</li>
+                            ))}
+                            {metaInfo.headings.h3.length > 5 && (
+                              <li className="text-gray-500">...他{metaInfo.headings.h3.length - 5}個</li>
+                            )}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {metaInfo.structuredData.length > 0 && (
+                    <div>
+                      <h3 className="text-lg font-semibold mb-3 text-gray-800">構造化データ (JSON-LD)</h3>
+                      <div className="bg-gray-50 p-4 rounded-lg overflow-x-auto">
+                        <pre className="text-sm text-gray-800">
+                          {JSON.stringify(metaInfo.structuredData, null, 2)}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
+
+                  {metaInfo.alternateLanguages.length > 0 && (
+                    <div>
+                      <h3 className="text-lg font-semibold mb-3 text-gray-800">代替言語</h3>
+                      <div className="grid gap-2">
+                        {metaInfo.alternateLanguages.map((alt, i) => (
+                          <div key={i} className="flex">
+                            <span className="font-medium text-gray-600 w-20">{alt.lang}:</span>
+                            <span className="text-gray-800 flex-1 break-all">{alt.url}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
