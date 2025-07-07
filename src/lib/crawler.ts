@@ -1,4 +1,5 @@
 import { chromium, Browser, Page } from 'playwright';
+import OpenAI from 'openai';
 
 interface PageContent {
   url: string;
@@ -21,7 +22,7 @@ export async function analyzeWebsite(url: string): Promise<string[]> {
     
     await crawlPage(page, url, baseUrl, visitedUrls, pageContents, 0);
     
-    const keywords = extractKeywords(pageContents);
+    const keywords = await extractKeywordsWithAI(pageContents);
     
     return keywords;
   } catch (error) {
@@ -90,7 +91,65 @@ async function crawlPage(
   }
 }
 
-function extractKeywords(pageContents: PageContent[]): string[] {
+async function extractKeywordsWithAI(pageContents: PageContent[]): Promise<string[]> {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('OpenAI API key not found');
+    return extractKeywordsFallback(pageContents);
+  }
+
+  try {
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+
+    const combinedContent = pageContents.map(page => 
+      `URL: ${page.url}\nTitle: ${page.title}\nDescription: ${page.metaDescription}\nHeadings: ${page.headings.join(', ')}\nContent: ${page.content.slice(0, 1000)}...`
+    ).join('\n\n');
+
+    const prompt = `
+あなたはSEOのエキスパートです。以下のウェブサイトの内容を分析し、Google検索で上位表示を狙えるような検索キーワードを10個提案してください。
+
+分析の観点:
+1. ビジネスの核心的な価値提案に関連するキーワード
+2. ターゲット顧客が検索しそうなキーワード
+3. 競合性と検索ボリュームのバランスが良いキーワード
+4. ロングテールキーワード（2-4語の組み合わせ）を含める
+5. 会社名や一般的すぎる単語は避ける
+
+ウェブサイトの内容:
+${combinedContent}
+
+以下の形式で、検索キーワードを10個提案してください:
+1. [キーワード]
+2. [キーワード]
+...
+10. [キーワード]
+
+各キーワードは日本語で、実際にユーザーが検索しそうな自然な表現にしてください。`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7,
+      max_tokens: 500,
+    });
+
+    const content = response.choices[0].message.content || '';
+    const keywords = content
+      .split('\n')
+      .filter(line => line.match(/^\d+\./))
+      .map(line => line.replace(/^\d+\.\s*/, '').trim())
+      .filter(keyword => keyword.length > 0)
+      .slice(0, 10);
+
+    return keywords.length > 0 ? keywords : extractKeywordsFallback(pageContents);
+  } catch (error) {
+    console.error('OpenAI API error:', error);
+    return extractKeywordsFallback(pageContents);
+  }
+}
+
+function extractKeywordsFallback(pageContents: PageContent[]): string[] {
   const wordFrequency = new Map<string, number>();
   const stopWords = new Set([
     'の', 'に', 'は', 'を', 'た', 'が', 'で', 'て', 'と', 'し', 'れ', 'さ', 'ある', 'いる', 'も', 'する',
